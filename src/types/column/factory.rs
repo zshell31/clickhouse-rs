@@ -16,6 +16,7 @@ use crate::{
         decimal::NoBits,
         column::{
             array::ArrayColumnData,
+            tuple::TupleColumnData,
             column_data::ColumnData,
             date::DateColumnData,
             datetime64::DateTime64ColumnData,
@@ -81,6 +82,8 @@ impl dyn ColumnData {
                     W::wrap(FixedStringColumnData::load(reader, size, str_len)?)
                 } else if let Some(inner_type) = parse_array_type(type_name) {
                     W::wrap(ArrayColumnData::load(reader, inner_type, size, tz)?)
+                } else if let Some(inner_types) = parse_tuple_type(type_name) {
+                    W::wrap(TupleColumnData::load(reader, inner_types, size, tz)?)
                 } else if let Some((precision, scale, nobits)) = parse_decimal(type_name) {
                     W::wrap(DecimalColumnData::load(
                         reader, precision, scale, nobits, size, tz,
@@ -137,6 +140,19 @@ impl dyn ColumnData {
             SqlType::Array(inner_type) => W::wrap(ArrayColumnData {
                 inner: ColumnData::from_type::<ArcColumnWrapper>(inner_type.clone(), timezone, capacity)?,
                 offsets: List::with_capacity(capacity),
+            }),
+            SqlType::Tuple(inner_types) => W::wrap(TupleColumnData {
+                inners: inner_types
+                    .iter()
+                    .map(|&inner_type| {
+                        ColumnData::from_type::<BoxColumnWrapper>(
+                            inner_type.clone(),
+                            timezone,
+                            capacity,
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                size: capacity,
             }),
             SqlType::Decimal(precision, scale) => {
                 let nobits = NoBits::from_precision(precision).unwrap();
@@ -208,6 +224,18 @@ fn parse_array_type(source: &str) -> Option<&str> {
 
     let inner_type = &source[6..source.len() - 1];
     Some(inner_type)
+}
+
+fn parse_tuple_type(source: &str) -> Option<Vec<&str>> {
+    if !source.starts_with("Tuple") {
+        return None;
+    }
+
+    let inner_types = source[6..source.len() - 1]
+        .split(',')
+        .map(|item| item.trim())
+        .collect();
+    Some(inner_types)
 }
 
 fn parse_decimal(source: &str) -> Option<(u8, u8, NoBits)> {

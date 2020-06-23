@@ -41,6 +41,7 @@ pub enum Value {
     Uuid([u8; 16]),
     Nullable(Either<&'static SqlType, Box<Value>>),
     Array(&'static SqlType, Arc<Vec<Value>>),
+    Tuple(Vec<Value>),
     Decimal(Decimal),
     Enum8(Vec<(String, i8)>, Enum8),
     Enum16(Vec<(String, i16)>, Enum16),
@@ -72,6 +73,7 @@ impl PartialEq for Value {
             }
             (Value::Nullable(a), Value::Nullable(b)) => *a == *b,
             (Value::Array(ta, a), Value::Array(tb, b)) => *ta == *tb && *a == *b,
+            (Value::Tuple(a), Value::Tuple(b)) => *a == *b,
             (Value::Decimal(a), Value::Decimal(b)) => *a == *b,
             (Value::Enum16(values_a, val_a), Value::Enum16(values_b, val_b)) => {
                 *values_a == *values_b && *val_a == *val_b
@@ -103,6 +105,12 @@ impl Value {
             SqlType::DateTime(_) => 0_u32.to_date(Tz::Zulu).into(),
             SqlType::Nullable(inner) => Value::Nullable(Either::Left(inner)),
             SqlType::Array(inner) => Value::Array(inner, Arc::new(Vec::default())),
+            SqlType::Tuple(inners) => Value::Tuple(
+                inners
+                    .into_iter()
+                    .map(|&inner| Value::default(inner.clone()))
+                    .collect::<Vec<_>>(),
+            ),
             SqlType::Decimal(precision, scale) => Value::Decimal(Decimal {
                 underlying: 0,
                 precision,
@@ -166,6 +174,10 @@ impl fmt::Display for Value {
                 let cells: Vec<String> = vs.iter().map(|v| format!("{}", v)).collect();
                 write!(f, "[{}]", cells.join(", "))
             }
+            Value::Tuple(vs) => {
+                let cells: Vec<String> = vs.iter().map(|v| format!("{}", v)).collect();
+                write!(f, "({})", cells.join(", "))
+            }
             Value::Decimal(v) => fmt::Display::fmt(v, f),
             Value::Ipv4(v) => {
                 write!(f, "{}", Ipv4Addr::from(*v))
@@ -209,6 +221,12 @@ impl convert::From<Value> for SqlType {
                 }
             },
             Value::Array(t, _) => SqlType::Array(t),
+            Value::Tuple(vs) => {
+                let sql_types: Vec<&'static SqlType> =
+                    vs.into_iter().map(|v| SqlType::from(v).into()).collect();
+
+                SqlType::Tuple(super::to_static_array(sql_types))
+            }
             Value::Decimal(v) => SqlType::Decimal(v.precision, v.scale),
             Value::Ipv4(_) => SqlType::Ipv4,
             Value::Ipv6(_) => SqlType::Ipv6,

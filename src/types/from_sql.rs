@@ -311,6 +311,161 @@ from_sql_impl! {
     f64: Float64
 }
 
+fn type_of<T>() -> String {
+    format!("{}", std::any::type_name::<T>())
+}
+
+macro_rules! replace_expr {
+    ($_tparam:ident $sub:expr) => {
+        $sub
+    };
+}
+
+macro_rules! tuple_len {
+    ($($tparam:ident),+) => {
+        <[()]>::len(&[$(replace_expr!($tparam ())),+])
+    }
+}
+
+macro_rules! from_sql_tuple_impl {
+    ($($tparam:ident),+) => {
+        impl <'a, $($tparam,)+> FromSql<'a> for ($($tparam,)+)
+        where
+            $(
+                $tparam: FromSql<'a>,
+            )+
+        {
+            fn from_sql(value: ValueRef<'a>) -> FromSqlResult<Self> {
+                const TLEN: usize = tuple_len!($($tparam),+);
+                match value {
+                    ValueRef::Tuple(vs) if vs.len() == TLEN => {
+                        let mut seq = 0..TLEN;
+                        Ok(($(
+                            <$tparam>::from_sql(vs[seq.next().unwrap()].clone())?,
+                        )+))
+                    },
+                    _ => {
+                        let from = SqlType::from(value).to_string();
+                        Err(Error::FromSql(FromSqlError::InvalidType {
+                            src: from,
+                            dst: type_of::<($($tparam,)+)>().into(),
+                        }))
+                    }
+                }
+            }
+        }
+    };
+}
+
+macro_rules! from_sql_vec_of_tuples_impl {
+    ($($tparam:ident),+) => {
+        impl <'a, $($tparam,)+> FromSql<'a> for Vec<($($tparam,)+)>
+        where
+            $(
+                $tparam: FromSql<'a>,
+            )+
+        {
+            fn from_sql(value: ValueRef<'a>) -> FromSqlResult<Self> {
+                match value {
+                    ValueRef::Array(SqlType::Tuple(_), vs) => {
+                        let mut result = Vec::with_capacity(vs.len());
+                        for v in vs.iter() {
+                            let value: ($($tparam,)+) = <($($tparam,)+)>::from_sql(v.clone())?;
+                            result.push(value);
+                        }
+                        Ok(result)
+                    }
+                    _ => {
+                        let from = SqlType::from(value.clone()).to_string();
+                        Err(Error::FromSql(FromSqlError::InvalidType {
+                            src: from,
+                            dst: format!("Vec<{}>", type_of::<($($tparam,)+)>()).into(),
+                        }))
+                    }
+                }
+            }
+        }
+    };
+}
+
+from_sql_tuple_impl!(T1);
+from_sql_tuple_impl!(T1, T2);
+from_sql_tuple_impl!(T1, T2, T3);
+from_sql_tuple_impl!(T1, T2, T3, T4);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6, T7);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
+from_sql_tuple_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12);
+
+from_sql_vec_of_tuples_impl!(T1);
+from_sql_vec_of_tuples_impl!(T1, T2);
+from_sql_vec_of_tuples_impl!(T1, T2, T3);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6, T7);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
+from_sql_vec_of_tuples_impl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12);
+
+// impl<'a, T1, T2, T3> FromSql<'a> for (T1, T2, T3)
+// where
+//     T1: FromSql<'a>,
+//     T2: FromSql<'a>,
+//     T3: FromSql<'a>,
+// {
+//     fn from_sql(value: ValueRef<'a>) -> FromSqlResult<Self> {
+//         match value {
+//             ValueRef::Tuple(vs) if vs.len() == 3 => {
+//                 let item1 = T1::from_sql(vs[0].1.clone())?;
+//                 let item2 = T2::from_sql(vs[1].1.clone())?;
+//                 let item3 = T3::from_sql(vs[2].1.clone())?;
+//                 Ok((item1, item2, item3))
+//             }
+//             _ => {
+//                 let from = SqlType::from(value).to_string();
+//                 Err(Error::FromSql(FromSqlError::InvalidType {
+//                     src: from,
+//                     dst: type_of::<(T1, T2, T3)>().into(),
+//                 }))
+//             }
+//         }
+//     }
+// }
+
+// impl<'a, T1, T2, T3> FromSql<'a> for Vec<(T1, T2, T3)>
+// where
+//     T1: FromSql<'a>,
+//     T2: FromSql<'a>,
+//     T3: FromSql<'a>,
+// {
+//     fn from_sql(value: ValueRef<'a>) -> FromSqlResult<Self> {
+//         match value {
+//             ValueRef::Array(SqlType::Tuple(_), vs) => {
+//                 let mut result = Vec::with_capacity(vs.len());
+//                 for v in vs.iter() {
+//                     let value: (T1, T2, T3) = <(T1, T2, T3)>::from_sql(v.clone())?;
+//                     result.push(value);
+//                 }
+//                 Ok(result)
+//             }
+//             _ => {
+//                 let from = SqlType::from(value.clone()).to_string();
+//                 Err(Error::FromSql(FromSqlError::InvalidType {
+//                     src: from,
+//                     dst: format!("Vec<{}>", type_of::<(T1, T2, T3)>()).into(),
+//                 }))
+//             }
+//         }
+//     }
+// }
+
 #[cfg(test)]
 mod test {
     use crate::types::{from_sql::FromSql, ValueRef};

@@ -49,6 +49,7 @@ mod nullable;
 mod numeric;
 mod string;
 mod string_pool;
+mod tuple;
 
 /// Represents Clickhouse Column
 pub struct Column<K: ColumnType> {

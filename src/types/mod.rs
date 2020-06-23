@@ -224,6 +224,7 @@ pub enum SqlType {
     Uuid,
     Nullable(&'static SqlType),
     Array(&'static SqlType),
+    Tuple(&'static [&'static SqlType]),
     Decimal(u8, u8),
     Enum8(Vec<(String, i8)>),
     Enum16(Vec<(String, i16)>),
@@ -261,6 +262,25 @@ impl From<SqlType> for &'static SqlType {
     }
 }
 
+lazy_static! {
+    static ref ARRAY_TYPES_CACHE: Mutex<HashMap<Vec<&'static SqlType>, Pin<Box<[&'static SqlType]>>>> =
+        Mutex::new(HashMap::new());
+}
+
+fn to_static_array(value: Vec<&'static SqlType>) -> &'static [&'static SqlType] {
+    let mut guard = ARRAY_TYPES_CACHE.lock().unwrap();
+    match guard.get(&value) {
+        Some(value_ref) => unsafe { mem::transmute(value_ref.as_ref()) },
+        None => {
+            let boxed: Box<[&'static SqlType]> = value.as_slice().into();
+            let pinned: Pin<Box<[&'static SqlType]>> = boxed.into();
+            let slice_ref = unsafe { mem::transmute(pinned.as_ref()) };
+            guard.insert(value, pinned);
+            slice_ref
+        }
+    }
+}
+
 impl SqlType {
     pub(crate) fn is_datetime(&self) -> bool {
         match self {
@@ -291,6 +311,15 @@ impl SqlType {
             SqlType::Uuid => "UUID".into(),
             SqlType::Nullable(nested) => format!("Nullable({})", &nested).into(),
             SqlType::Array(nested) => format!("Array({})", &nested).into(),
+            SqlType::Tuple(nested) => format!(
+                "Tuple({})",
+                nested
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .into(),
             SqlType::Decimal(precision, scale) => {
                 format!("Decimal({}, {})", precision, scale).into()
             }
